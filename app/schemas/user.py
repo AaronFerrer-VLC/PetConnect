@@ -6,6 +6,7 @@ class UserCreate(BaseModel):
     email: EmailStr
     city: Optional[str] = None
     is_caretaker: bool = False
+    password: str = Field(..., min_length=6)
 
 class UserOut(BaseModel):
     id: str

@@ -1,5 +1,8 @@
 from pydantic import BaseModel
 from datetime import datetime
+from typing import Literal
+
+BookingStatus = Literal["pending", "accepted", "rejected", "completed"]
 
 class BookingCreate(BaseModel):
     owner_id: str
@@ -8,6 +11,7 @@ class BookingCreate(BaseModel):
     pet_id: str
     start: datetime
     end: datetime
+    status: BookingStatus = "pending"
 
 class BookingOut(BaseModel):
     id: str
@@ -17,3 +21,7 @@ class BookingOut(BaseModel):
     pet_id: str
     start: datetime
     end: datetime
+    status: BookingStatus
+
+class BookingStatusUpdate(BaseModel):
+    status: BookingStatus

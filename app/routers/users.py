@@ -4,6 +4,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from ..db import get_db
 from ..schemas.user import UserCreate, UserOut
 from ..utils import to_id
+from ..security import get_current_user
 
 router = APIRouter()
 
@@ -22,3 +23,7 @@ async def list_users(db: AsyncIOMotorDatabase = Depends(get_db)):
     async for doc in db.users.find().sort("name", 1):
         items.append(to_id(doc))
     return items
+
+@router.get("/me", response_model=UserOut)
+async def me(current_user: dict = Depends(get_current_user)):
+    return current_user

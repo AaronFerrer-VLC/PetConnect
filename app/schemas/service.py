@@ -6,6 +6,7 @@ class ServiceCreate(BaseModel):
     title: str = Field(..., min_length=3, max_length=80)
     price_per_hour: float = Field(..., ge=0.0)
     description: Optional[str] = None
+    category: Optional[str] = None  # "paseo", "alojamiento", etc.
 
 class ServiceOut(BaseModel):
     id: str

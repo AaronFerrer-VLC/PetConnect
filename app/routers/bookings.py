@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from ..db import get_db
-from ..schemas.booking import BookingCreate, BookingOut
+from ..schemas.booking import BookingCreate, BookingOut, BookingStatusUpdate
 from ..utils import to_id
 from bson import ObjectId
 
@@ -36,3 +36,27 @@ async def list_bookings(db: AsyncIOMotorDatabase = Depends(get_db)):
     async for doc in db.bookings.find().sort("start", -1):
         items.append(to_id(doc))
     return items
+
+@router.patch("/{booking_id}/status", response_model=BookingOut)
+async def update_status(booking_id: str, payload: BookingStatusUpdate, db: AsyncIOMotorDatabase = Depends(get_db)):
+    if not ObjectId.is_valid(booking_id):
+        raise HTTPException(400, "Invalid booking id")
+
+    doc = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+    if not doc:
+        raise HTTPException(404, "Booking not found")
+
+    old = doc.get("status", "pending")
+    new = payload.status
+    allowed = {
+        "pending": {"accepted", "rejected"},
+        "accepted": {"completed", "rejected"},
+        "rejected": set(),
+        "completed": set(),
+    }
+    if old != new and new not in allowed.get(old, set()):
+        raise HTTPException(400, f"Transición no permitida: {old} → {new}")
+
+    await db.bookings.update_one({"_id": doc["_id"]}, {"$set": {"status": new}})
+    doc = await db.bookings.find_one({"_id": doc["_id"]})
+    return to_id(doc)

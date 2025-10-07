@@ -16,4 +16,5 @@ async def get_db() -> AsyncIOMotorDatabase:
         await _db.services.create_index([("caretaker_id", 1)])
         await _db.bookings.create_index([("owner_id", 1), ("caretaker_id", 1)])
         await _db.messages.create_index([("thread_id", 1)])
+        await _db.services.create_index([("category", 1)])
     return _db

@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from .config import get_settings
-from .routers import users, pets, services, bookings, messages
+from .routers import users, pets, services, bookings, messages, auth
 
 settings = get_settings()
 app = FastAPI(title=settings.app_name)
@@ -15,3 +15,4 @@ app.include_router(pets.router, prefix="/pets", tags=["pets"])
 app.include_router(services.router, prefix="/services", tags=["services"])
 app.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
 app.include_router(messages.router, prefix="/messages", tags=["messages"])
+app.include_router(auth.router, prefix="/auth", tags=["auth"])
