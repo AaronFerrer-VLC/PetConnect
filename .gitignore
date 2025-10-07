@@ -1,0 +1,27 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+env/
+venv/
+
+# VSCode
+.vscode/*.log
+.vscode/.ropeproject
+
+# Environment & local
+.env
+.env.*
+*.sqlite3
+
+# Mac/Windows
+.DS_Store
+Thumbs.db
+
+# Python packaging
+build/
+dist/
+*.egg-info/

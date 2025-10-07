@@ -1,0 +1,17 @@
+from fastapi import FastAPI
+from .config import get_settings
+from .routers import users, pets, services, bookings, messages
+
+settings = get_settings()
+app = FastAPI(title=settings.app_name)
+
+@app.get("/health")
+async def health():
+    return {"status": "ok", "env": settings.env}
+
+# Routers
+app.include_router(users.router, prefix="/users", tags=["users"])
+app.include_router(pets.router, prefix="/pets", tags=["pets"])
+app.include_router(services.router, prefix="/services", tags=["services"])
+app.include_router(bookings.router, prefix="/bookings", tags=["bookings"])
+app.include_router(messages.router, prefix="/messages", tags=["messages"])

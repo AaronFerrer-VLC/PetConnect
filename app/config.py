@@ -1,0 +1,13 @@
+from functools import lru_cache
+from pydantic import BaseModel
+import os
+
+class Settings(BaseModel):
+    app_name: str = os.getenv("APP_NAME", "PetConnect")
+    env: str = os.getenv("APP_ENV", "dev")
+    mongodb_uri: str = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
+    db_name: str = os.getenv("DB_NAME", "petconnect")
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
