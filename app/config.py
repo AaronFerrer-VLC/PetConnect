@@ -2,6 +2,9 @@ from functools import lru_cache
 from pydantic import BaseModel
 import os
 
+from dotenv import load_dotenv
+load_dotenv()  # carga el archivo .env de la raíz
+
 class Settings(BaseModel):
     app_name: str = os.getenv("APP_NAME", "PetConnect")
     env: str = os.getenv("APP_ENV", "dev")
