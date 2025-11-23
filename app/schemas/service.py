@@ -1,16 +1,17 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Optional, Literal
+
+ServiceType = Literal["boarding", "daycare", "walking", "house_sitting", "drop_in"]
 
 class ServiceCreate(BaseModel):
-    caretaker_id: str
-    title: str = Field(..., min_length=3, max_length=80)
-    price_per_hour: float = Field(..., ge=0.0)
-    description: Optional[str] = None
-    category: Optional[str] = None  # "paseo", "alojamiento", etc.
+    type: ServiceType
+    price: float = Field(..., ge=0)
+    description: Optional[str] = Field(None, max_length=280)
 
 class ServiceOut(BaseModel):
     id: str
     caretaker_id: str
-    title: str
-    price_per_hour: float
+    type: ServiceType
+    price: float
     description: Optional[str] = None
+    enabled: Optional[bool] = True

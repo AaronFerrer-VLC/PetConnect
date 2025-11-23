@@ -1,62 +1,177 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+# app/routers/bookings.py
+from fastapi import APIRouter, Depends, HTTPException, status, Path
 from typing import List
 from motor.motor_asyncio import AsyncIOMotorDatabase
-from ..db import get_db
-from ..schemas.booking import BookingCreate, BookingOut, BookingStatusUpdate
-from ..utils import to_id
 from bson import ObjectId
+from datetime import datetime, timedelta
+
+from ..db import get_db
+from ..schemas.booking import BookingCreate, BookingOut, StatusPatch, BookingStatus
+from ..utils import to_id
+from ..security import get_current_user
 
 router = APIRouter()
 
+# ---------- Utilidades ----------
+
+def _oid(value: str, field_name: str = "id") -> ObjectId:
+    if not ObjectId.is_valid(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
+    return ObjectId(value)
+
+def _days_between_inclusive(start_dt: datetime, end_dt: datetime) -> list[str]:
+    if end_dt < start_dt:
+        raise HTTPException(status_code=400, detail="end debe ser posterior a start")
+    days = []
+    cur = start_dt.date()
+    last = end_dt.date()
+    while cur <= last:
+        days.append(cur.isoformat())
+        cur += timedelta(days=1)
+    return days
+
+def _overlaps(a_start: datetime, a_end: datetime, b_start: datetime, b_end: datetime) -> bool:
+    return (a_start < b_end) and (a_end > b_start)
+
+ALLOWED: dict[BookingStatus, set[BookingStatus]] = {
+    BookingStatus.pending: {BookingStatus.accepted, BookingStatus.rejected},
+    BookingStatus.accepted: {BookingStatus.completed, BookingStatus.rejected},
+    BookingStatus.rejected: set(),
+    BookingStatus.completed: set(),
+}
+
+def _to_out(doc: dict) -> dict:
+    d = to_id(doc)
+    if isinstance(d.get("status"), BookingStatus):
+        d["status"] = d["status"].value
+    return d
+
+# ---------- Endpoints ----------
+
+@router.get("/mine", response_model=List[BookingOut])
+@router.get("/my", response_model=List[BookingOut])  # alias opcional
+async def list_my_bookings(
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    docs = await db.bookings.find({
+        "$or": [{"owner_id": current["id"]}, {"caretaker_id": current["id"]}]
+    }).sort("start", 1).to_list(500)
+    return [_to_out(d) for d in docs]
+
+@router.get("/{booking_id}", response_model=BookingOut)
+async def get_booking(
+    booking_id: str = Path(..., pattern=r"^[0-9a-fA-F]{24}$"),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    b = await db.bookings.find_one({"_id": _oid(booking_id)})
+    if not b:
+        raise HTTPException(404, "Reserva no encontrada")
+    if str(b.get("owner_id")) != current["id"] and str(b.get("caretaker_id")) != current["id"]:
+        raise HTTPException(403, "Sin acceso a esta reserva")
+    return _to_out(b)
+
 @router.post("", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
-async def create_booking(payload: BookingCreate, db: AsyncIOMotorDatabase = Depends(get_db)):
-    for key in ["owner_id", "caretaker_id", "service_id", "pet_id"]:
-        if not ObjectId.is_valid(getattr(payload, key)):
-            raise HTTPException(400, f"Invalid {key}")
-    # basic existence checks
-    if not await db.users.find_one({"_id": ObjectId(payload.owner_id)}):
-        raise HTTPException(404, "Owner not found")
-    if not await db.users.find_one({"_id": ObjectId(payload.caretaker_id)}):
-        raise HTTPException(404, "Caretaker not found")
-    if not await db.services.find_one({"_id": ObjectId(payload.service_id)}):
-        raise HTTPException(404, "Service not found")
-    if not await db.pets.find_one({"_id": ObjectId(payload.pet_id)}):
-        raise HTTPException(404, "Pet not found")
-
+async def create_booking(
+    payload: BookingCreate,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current=Depends(get_current_user),
+):
     if payload.end <= payload.start:
-        raise HTTPException(400, "end must be after start")
+        raise HTTPException(400, "end debe ser posterior a start")
 
-    res = await db.bookings.insert_one(payload.model_dump())
-    doc = await db.bookings.find_one({"_id": res.inserted_id})
-    return to_id(doc)
+    caretaker = await db.users.find_one({"_id": _oid(payload.caretaker_id)})
+    if not caretaker or not caretaker.get("is_caretaker", False):
+        raise HTTPException(404, "Cuidador no encontrado")
 
-@router.get("", response_model=List[BookingOut])
-async def list_bookings(db: AsyncIOMotorDatabase = Depends(get_db)):
-    items = []
-    async for doc in db.bookings.find().sort("start", -1):
-        items.append(to_id(doc))
-    return items
+    service = await db.services.find_one({"_id": _oid(payload.service_id)})
+    if not service or str(service.get("caretaker_id")) != payload.caretaker_id:
+        raise HTTPException(400, "Servicio inválido para este cuidador")
+
+    pet = await db.pets.find_one({"_id": _oid(payload.pet_id)})
+    if not pet or str(pet.get("owner_id")) != current["id"]:
+        raise HTTPException(403, "No puedes reservar con una mascota que no es tuya")
+
+    av = caretaker.get("availability", {"max_pets": 1, "blocked_dates": []})
+    max_pets = max(1, int(av.get("max_pets", 1)))
+    blocked = set(av.get("blocked_dates", []))
+    for day in _days_between_inclusive(payload.start, payload.end):
+        if day in blocked:
+            raise HTTPException(400, f"El cuidador no está disponible el {day}")
+
+    overlapping = await db.bookings.count_documents({
+        "caretaker_id": payload.caretaker_id,
+        "status": {"$in": [BookingStatus.pending.value, BookingStatus.accepted.value]},
+        "start": {"$lt": payload.end},
+        "end": {"$gt": payload.start},
+    })
+    if overlapping >= max_pets:
+        raise HTTPException(409, "No hay hueco en esas fechas/horas")
+
+    # Calcular precio total basado en el servicio y duración
+    service_price = float(service.get("price", 0))
+    duration_days = (payload.end - payload.start).days + 1
+    if duration_days < 1:
+        duration_days = 1
+    total_price = round(service_price * duration_days, 2)
+
+    doc = {
+        "owner_id": current["id"],
+        "caretaker_id": payload.caretaker_id,
+        "service_id": payload.service_id,
+        "pet_id": payload.pet_id,
+        "start": payload.start,
+        "end": payload.end,
+        "status": BookingStatus.pending.value,
+        "total_price": total_price,
+        "created_at": datetime.utcnow(),
+    }
+    res = await db.bookings.insert_one(doc)
+    created = await db.bookings.find_one({"_id": res.inserted_id})
+    return _to_out(created)
 
 @router.patch("/{booking_id}/status", response_model=BookingOut)
-async def update_status(booking_id: str, payload: BookingStatusUpdate, db: AsyncIOMotorDatabase = Depends(get_db)):
-    if not ObjectId.is_valid(booking_id):
-        raise HTTPException(400, "Invalid booking id")
-
-    doc = await db.bookings.find_one({"_id": ObjectId(booking_id)})
+async def patch_status(
+    body: StatusPatch,  # <-- SIN default va primero
+    booking_id: str = Path(..., pattern=r"^[0-9a-fA-F]{24}$"),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    doc = await db.bookings.find_one({"_id": _oid(booking_id)})
     if not doc:
-        raise HTTPException(404, "Booking not found")
+        raise HTTPException(404, "Reserva no encontrada")
 
-    old = doc.get("status", "pending")
-    new = payload.status
-    allowed = {
-        "pending": {"accepted", "rejected"},
-        "accepted": {"completed", "rejected"},
-        "rejected": set(),
-        "completed": set(),
-    }
-    if old != new and new not in allowed.get(old, set()):
-        raise HTTPException(400, f"Transición no permitida: {old} → {new}")
+    old = BookingStatus(doc.get("status"))
+    new = body.status
 
-    await db.bookings.update_one({"_id": doc["_id"]}, {"$set": {"status": new}})
-    doc = await db.bookings.find_one({"_id": doc["_id"]})
-    return to_id(doc)
+    if str(doc["caretaker_id"]) != current["id"]:
+        raise HTTPException(403, "Solo el cuidador puede cambiar el estado")
+
+    if new == old:
+        return _to_out(doc)
+
+    allowed_next = ALLOWED.get(old, set())
+    if new not in allowed_next:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Transición no permitida: {old.value} → {new.value}",
+        )
+
+    if new == BookingStatus.accepted:
+        caretaker = await db.users.find_one({"_id": doc["caretaker_id"]})
+        av = caretaker.get("availability", {"max_pets": 1})
+        max_pets = max(1, int(av.get("max_pets", 1)))
+        overlapping = await db.bookings.count_documents({
+            "_id": {"$ne": doc["_id"]},
+            "caretaker_id": doc["caretaker_id"],
+            "status": {"$in": [BookingStatus.pending.value, BookingStatus.accepted.value]},
+            "start": {"$lt": doc["end"]},
+            "end": {"$gt": doc["start"]},
+        })
+        if overlapping >= max_pets:
+            raise HTTPException(409, "Capacidad agotada; no se puede aceptar")
+
+    await db.bookings.update_one({"_id": doc["_id"]}, {"$set": {"status": new.value}})
+    updated = await db.bookings.find_one({"_id": doc["_id"]})
+    return _to_out(updated)

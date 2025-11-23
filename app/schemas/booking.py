@@ -1,17 +1,19 @@
 from pydantic import BaseModel
+from enum import Enum
 from datetime import datetime
-from typing import Literal
 
-BookingStatus = Literal["pending", "accepted", "rejected", "completed"]
+class BookingStatus(str, Enum):
+    pending   = "pending"
+    accepted  = "accepted"
+    rejected  = "rejected"
+    completed = "completed"
 
 class BookingCreate(BaseModel):
-    owner_id: str
     caretaker_id: str
     service_id: str
     pet_id: str
     start: datetime
     end: datetime
-    status: BookingStatus = "pending"
 
 class BookingOut(BaseModel):
     id: str
@@ -22,6 +24,7 @@ class BookingOut(BaseModel):
     start: datetime
     end: datetime
     status: BookingStatus
+    total_price: float | None = None
 
-class BookingStatusUpdate(BaseModel):
+class StatusPatch(BaseModel):
     status: BookingStatus

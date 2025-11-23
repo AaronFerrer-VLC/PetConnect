@@ -16,5 +16,12 @@ async def get_db() -> AsyncIOMotorDatabase:
         await _db.services.create_index([("caretaker_id", 1)])
         await _db.bookings.create_index([("owner_id", 1), ("caretaker_id", 1)])
         await _db.messages.create_index([("thread_id", 1)])
-        await _db.services.create_index([("category", 1)])
+        await _db.messages.create_index([("sender_id", 1), ("receiver_id", 1)])
+        await _db.messages.create_index([("receiver_id", 1), ("read", 1)])
+        await _db.payments.create_index([("booking_id", 1)])
+        await _db.reports.create_index([("booking_id", 1)])
+        await _db.reports.create_index([("caretaker_id", 1)])
+        await _db.payments.create_index([("owner_id", 1), ("caretaker_id", 1)])
+        # Índice geoespacial 2dsphere para búsquedas por ubicación
+        await _db.users.create_index([("lat", 1), ("lng", 1)])
     return _db
