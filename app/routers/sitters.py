@@ -3,9 +3,11 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from ..db import get_db
 from ..utils import to_id, haversine_distance, geocode_city, is_within_radius
+from ..security import get_current_user_id
 
 router = APIRouter()
 
@@ -116,15 +118,27 @@ async def search_sitters(
         minp = min((int(s.get("price", 0)) for s in services_ct), default=None)
         services_types = sorted({s.get("type") for s in services_ct if s.get("type")})
 
+        # Calcular rating promedio y conteo de reseñas
+        reviews = await db.reviews.find({"sitter_id": ObjectId(sid)}).to_list(100)
+        rating_avg = None
+        rating_count = 0
+        if reviews:
+            ratings = [r.get("rating", 0) for r in reviews if isinstance(r.get("rating"), (int, float))]
+            if ratings:
+                rating_avg = sum(ratings) / len(ratings)
+                rating_count = len(ratings)
+
         sitter_data = {
             "id": sid,
             "name": u.get("name"),
             "city": _city_of(u),
             "photo": u.get("photo") or (u.get("profile") or {}).get("photos", [None])[0],
+            "address": u.get("address"),  # Añadir dirección
+            "bio": (u.get("profile") or {}).get("bio", ""),
             "services": services_types,
             "min_price": minp,
-            "rating_avg": None,
-            "rating_count": 0,
+            "rating_avg": round(rating_avg, 1) if rating_avg is not None else None,
+            "rating_count": rating_count,
             "accepts_sizes": (u.get("profile") or {}).get("accepts_sizes") or [],
         }
         
@@ -148,10 +162,23 @@ async def search_sitters(
 
     return out
 
+async def get_current_user_optional_id(
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+) -> Optional[str]:
+    """Devuelve el user_id si hay token válido, None si no."""
+    if not credentials:
+        return None
+    try:
+        user_id = await get_current_user_id(token=credentials.credentials)
+        return user_id
+    except Exception:
+        return None
+
 @router.get("/{sitter_id}")
 async def get_sitter(
     sitter_id: str,
     db: AsyncIOMotorDatabase = Depends(get_db),
+    current_user_id: Optional[str] = Depends(get_current_user_optional_id),
 ):
     if not ObjectId.is_valid(sitter_id):
         raise HTTPException(status_code=400, detail="Invalid sitter id")
@@ -162,8 +189,41 @@ async def get_sitter(
 
     # servicios habilitados del cuidador
     svcs = await db.services.find({"caretaker_id": sitter_id, "enabled": True}).to_list(100)
+    
+    # Calcular rating promedio y conteo de reseñas
+    reviews = await db.reviews.find({"sitter_id": ObjectId(sitter_id), "review_type": "sitter"}).to_list(100)
+    rating_avg = None
+    rating_count = 0
+    if reviews:
+        ratings = [r.get("rating", 0) for r in reviews if isinstance(r.get("rating"), (int, float))]
+        if ratings:
+            rating_avg = sum(ratings) / len(ratings)
+            rating_count = len(ratings)
+    
     doc = to_id(u)
     doc["city"] = _city_of(u)
+    doc["address"] = u.get("address")  # Siempre mostrar dirección si existe
     doc["services"] = [to_id(s) for s in svcs]
+    doc["rating_avg"] = round(rating_avg, 1) if rating_avg is not None else None
+    doc["rating_count"] = rating_count
+    
+    # Verificar si el usuario actual tiene acceso al teléfono
+    # Solo mostrar teléfono si el usuario es dueño de una reserva pagada con este cuidador
+    show_phone = False
+    if current_user_id and ObjectId.is_valid(current_user_id):
+        # Buscar si hay un pago completado donde el usuario actual es el dueño y este cuidador es el cuidador
+        payment = await db.payments.find_one({
+            "owner_id": ObjectId(current_user_id),
+            "caretaker_id": ObjectId(sitter_id),
+            "status": "completed"
+        })
+        if payment:
+            show_phone = True
+    
+    if show_phone:
+        doc["phone"] = u.get("phone")
+    else:
+        doc["phone"] = None  # No mostrar teléfono si no hay acceso
+    
     return doc
 

@@ -4,8 +4,31 @@ from typing import Optional, List, Dict, Any
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
 from ..db import get_db
-from ..security import get_current_user
+from ..security import get_current_user, get_current_user_id
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from ..utils import to_id
+
+# Dependencia opcional para autenticación
+async def get_current_user_optional(
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(HTTPBearer(auto_error=False)),
+) -> Optional[dict]:
+    """Devuelve el usuario si hay token, None si no."""
+    if not credentials:
+        return None
+    try:
+        from jose import jwt, JWTError
+        from ..config import get_settings
+        settings = get_settings()
+        payload = jwt.decode(credentials.credentials, settings.jwt_secret, algorithms=["HS256"])
+        user_id = payload.get("sub")
+        if user_id:
+            doc = await db.users.find_one({"_id": ObjectId(user_id)})
+            if doc:
+                return to_id(doc)
+    except:
+        pass
+    return None
 
 router = APIRouter()
 
@@ -16,21 +39,25 @@ def _oid(v: str, field: str = "id") -> ObjectId:
         raise HTTPException(400, f"Invalid {field}")
     return ObjectId(v)
 
-# GET /services?sitter_id=...
+# GET /services?sitter_id=... (público si hay sitter_id, requiere auth si no)
 @router.get("", response_model=List[Dict[str, Any]])
 async def list_services(
     sitter_id: Optional[str] = None,
     db: AsyncIOMotorDatabase = Depends(get_db),
-    current=Depends(get_current_user),
+    current: Optional[dict] = Depends(get_current_user_optional),
 ):
-    q: Dict[str, Any] = {}
+    # Si hay sitter_id, es público (no requiere auth)
     if sitter_id:
-        q["caretaker_id"] = sitter_id        # público: servicios de un cuidador
+        q: Dict[str, Any] = {"caretaker_id": sitter_id, "enabled": True}
+        docs = await db.services.find(q).sort("type", 1).to_list(200)
+        return [to_id(d) for d in docs]
     else:
-        q["caretaker_id"] = current["id"]     # “mis servicios”
-
-    docs = await db.services.find(q).sort("type", 1).to_list(200)
-    return [to_id(d) for d in docs]
+        # Sin sitter_id requiere autenticación
+        if not current:
+            raise HTTPException(status_code=401, detail="Se requiere autenticación para ver tus servicios")
+        q: Dict[str, Any] = {"caretaker_id": current["id"]}
+        docs = await db.services.find(q).sort("type", 1).to_list(200)
+        return [to_id(d) for d in docs]
 
 # POST /services
 @router.post("", status_code=status.HTTP_201_CREATED)

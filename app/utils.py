@@ -1,17 +1,43 @@
 # app/utils.py
 from typing import Any, Dict, Optional, Tuple
 import math
+from bson import ObjectId
+from datetime import datetime
 
 def to_id(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
-    Convierte _id -> id (str). Si doc es None, devuelve {}.
+    Convierte _id -> id (str) y todos los ObjectIds a strings.
+    También convierte datetime a ISO format strings.
+    Si doc es None, devuelve {}.
     Útil para content-type dinámico en respuestas internas.
     """
     if doc is None:
         return {}
     d = dict(doc)
+    
+    # Convertir _id a id
     if "_id" in d:
         d["id"] = str(d.pop("_id"))
+    
+    # Convertir todos los ObjectIds a strings
+    for key, value in d.items():
+        if isinstance(value, ObjectId):
+            d[key] = str(value)
+        elif isinstance(value, datetime):
+            d[key] = value.isoformat()
+        elif isinstance(value, dict):
+            # Recursivamente convertir ObjectIds en diccionarios anidados
+            d[key] = to_id(value)
+        elif isinstance(value, list):
+            # Convertir ObjectIds en listas
+            d[key] = [
+                str(item) if isinstance(item, ObjectId) 
+                else item.isoformat() if isinstance(item, datetime)
+                else to_id(item) if isinstance(item, dict)
+                else item
+                for item in value
+            ]
+    
     return d
 
 # ==================== Geolocalización ====================

@@ -138,3 +138,54 @@ async def mark_thread_read(
         {"$set": {"read": True, "read_at": datetime.utcnow()}}
     )
     return {"updated": result.modified_count}
+
+@router.patch("/{message_id}", response_model=MessageOut)
+async def update_message(
+    message_id: str,
+    payload: dict,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    """Editar un mensaje (solo el autor y dentro de un tiempo límite)"""
+    message = await db.messages.find_one({"_id": _oid(message_id)})
+    if not message:
+        raise HTTPException(404, "Mensaje no encontrado")
+    
+    if str(message.get("sender_id")) != current["id"]:
+        raise HTTPException(403, "Solo puedes editar tus propios mensajes")
+    
+    # Opcional: limitar edición a mensajes recientes (ej: 15 minutos)
+    created_at = message.get("created_at")
+    if created_at:
+        time_diff = (datetime.utcnow() - created_at).total_seconds()
+        if time_diff > 900:  # 15 minutos
+            raise HTTPException(400, "Solo puedes editar mensajes recientes (15 minutos)")
+    
+    updates = {}
+    if "body" in payload:
+        updates["body"] = payload["body"].strip()
+        updates["edited_at"] = datetime.utcnow()
+    
+    if not updates:
+        return to_id(message)
+    
+    await db.messages.update_one({"_id": _oid(message_id)}, {"$set": updates})
+    updated = await db.messages.find_one({"_id": _oid(message_id)})
+    return to_id(updated)
+
+@router.delete("/{message_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_message(
+    message_id: str,
+    db: AsyncIOMotorDatabase = Depends(get_db),
+    current=Depends(get_current_user),
+):
+    """Eliminar un mensaje (solo el autor)"""
+    message = await db.messages.find_one({"_id": _oid(message_id)})
+    if not message:
+        raise HTTPException(404, "Mensaje no encontrado")
+    
+    if str(message.get("sender_id")) != current["id"]:
+        raise HTTPException(403, "Solo puedes eliminar tus propios mensajes")
+    
+    await db.messages.delete_one({"_id": _oid(message_id)})
+    return None

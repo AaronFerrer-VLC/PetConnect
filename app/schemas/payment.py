@@ -18,6 +18,9 @@ class PaymentCreate(BaseModel):
     booking_id: str
     amount: float
     payment_method: PaymentMethod = PaymentMethod.card
+    
+    class Config:
+        use_enum_values = True  # Permite usar strings directamente
 
 class PaymentOut(BaseModel):
     id: str

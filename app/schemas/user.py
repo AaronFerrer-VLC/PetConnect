@@ -52,6 +52,10 @@ class UserOut(BaseModel):
     city: Optional[str] = None     # espejo rápido de profile.city
     profile: Profile = Profile()
 
+    # Dirección y teléfono (solo para cuidadores)
+    address: Optional[str] = None
+    phone: Optional[str] = None
+
     # Disponibilidad resumida
     availability: AvailabilityOut = AvailabilityOut()
 

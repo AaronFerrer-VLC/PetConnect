@@ -82,6 +82,37 @@ async def upload_pet_photo(
     pet = await db.pets.find_one({"_id": oid})
     return to_out(pet)
 
+@router.patch("/{pet_id}", response_model=PetOut)
+async def update_pet(
+    pet_id: str,
+    payload: dict,
+    current=Depends(get_current_user),
+    db: AsyncIOMotorDatabase = Depends(get_db),
+):
+    try:
+        oid = ObjectId(pet_id)
+    except Exception:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    
+    pet = await db.pets.find_one({"_id": oid})
+    if not pet:
+        raise HTTPException(status_code=404, detail="Mascota no encontrada")
+    if str(pet.get("owner_id")) != current["id"]:
+        raise HTTPException(status_code=403, detail="No eres el propietario")
+    
+    updates: dict = {}
+    allowed_fields = ["name", "breed", "age_years", "weight_kg", "sex", "care_instructions", "personality", "needs", "notes"]
+    for field in allowed_fields:
+        if field in payload:
+            updates[field] = payload[field]
+    
+    if not updates:
+        return to_out(pet)
+    
+    await db.pets.update_one({"_id": oid}, {"$set": updates})
+    updated = await db.pets.find_one({"_id": oid})
+    return to_out(updated)
+
 @router.delete("/{pet_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_pet(
     pet_id: str,

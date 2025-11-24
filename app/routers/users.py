@@ -21,6 +21,8 @@ class UserPatch(BaseModel):
     profile: Optional[dict] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
+    address: Optional[str] = None
+    phone: Optional[str] = None
 
 class GalleryIn(BaseModel):
     images: List[str]
@@ -160,6 +162,10 @@ async def patch_me(
         updates["photo"] = body.photo
     if body.bio is not None:
         updates["profile.bio"] = body.bio
+    if body.address is not None:
+        updates["address"] = body.address
+    if body.phone is not None:
+        updates["phone"] = body.phone
     if body.profile:
         for k, v in body.profile.items():
             updates[f"profile.{k}"] = v

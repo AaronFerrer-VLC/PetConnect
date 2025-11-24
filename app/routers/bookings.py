@@ -142,10 +142,20 @@ async def patch_status(
     if not doc:
         raise HTTPException(404, "Reserva no encontrada")
 
-    old = BookingStatus(doc.get("status"))
+    # Obtener el status actual (puede ser string o BookingStatus)
+    status_str = doc.get("status")
+    if not status_str:
+        raise HTTPException(400, "Estado de reserva inválido")
+    try:
+        old = BookingStatus(status_str) if isinstance(status_str, str) else status_str
+    except (ValueError, TypeError):
+        raise HTTPException(400, f"Estado de reserva inválido: {status_str}")
+    
     new = body.status
 
-    if str(doc["caretaker_id"]) != current["id"]:
+    # Verificar que el usuario actual es el cuidador
+    caretaker_id_str = str(doc.get("caretaker_id", ""))
+    if caretaker_id_str != current["id"]:
         raise HTTPException(403, "Solo el cuidador puede cambiar el estado")
 
     if new == old:
@@ -159,12 +169,16 @@ async def patch_status(
         )
 
     if new == BookingStatus.accepted:
-        caretaker = await db.users.find_one({"_id": doc["caretaker_id"]})
+        # Usar ObjectId para buscar el cuidador
+        caretaker_oid = doc["caretaker_id"] if isinstance(doc["caretaker_id"], ObjectId) else _oid(caretaker_id_str)
+        caretaker = await db.users.find_one({"_id": caretaker_oid})
+        if not caretaker:
+            raise HTTPException(404, "Cuidador no encontrado")
         av = caretaker.get("availability", {"max_pets": 1})
         max_pets = max(1, int(av.get("max_pets", 1)))
         overlapping = await db.bookings.count_documents({
             "_id": {"$ne": doc["_id"]},
-            "caretaker_id": doc["caretaker_id"],
+            "caretaker_id": caretaker_id_str,  # Usar string para la consulta
             "status": {"$in": [BookingStatus.pending.value, BookingStatus.accepted.value]},
             "start": {"$lt": doc["end"]},
             "end": {"$gt": doc["start"]},
