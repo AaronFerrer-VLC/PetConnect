@@ -6,7 +6,10 @@ from bson import ObjectId
 from ..db import get_db
 from ..security import get_current_user, get_current_user_id
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from ..utils import to_id
+from ..utils import to_id, to_object_id
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Dependencia opcional para autenticación
 async def get_current_user_optional(
@@ -26,7 +29,7 @@ async def get_current_user_optional(
             doc = await db.users.find_one({"_id": ObjectId(user_id)})
             if doc:
                 return to_id(doc)
-    except:
+    except Exception:
         pass
     return None
 
@@ -34,10 +37,8 @@ router = APIRouter()
 
 SERVICE_TYPES = {"boarding", "daycare", "walking", "house_sitting", "drop_in"}
 
-def _oid(v: str, field: str = "id") -> ObjectId:
-    if not ObjectId.is_valid(v):
-        raise HTTPException(400, f"Invalid {field}")
-    return ObjectId(v)
+# Usar función centralizada
+_oid = to_object_id
 
 # GET /services?sitter_id=... (público si hay sitter_id, requiere auth si no)
 @router.get("", response_model=List[Dict[str, Any]])

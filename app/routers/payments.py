@@ -1,5 +1,5 @@
 # app/routers/payments.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Request
 from typing import List, Optional
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -8,18 +8,20 @@ import uuid
 
 from ..db import get_db
 from ..security import get_current_user
-from ..utils import to_id
+from ..utils import to_id, to_object_id
 from ..schemas.payment import PaymentCreate, PaymentOut, PaymentStatus, PaymentMethod
+from ..middleware.rate_limit import apply_rate_limit
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # Comisión de plataforma: 15% (como Rover)
 PLATFORM_FEE_RATE = 0.15
 
-def _oid(value: str, field_name: str = "id") -> ObjectId:
-    if not ObjectId.is_valid(value):
-        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
-    return ObjectId(value)
+# Usar función centralizada
+_oid = to_object_id
 
 def _calculate_payment(amount: float) -> dict:
     """Calcula comisión de plataforma y pago al cuidador"""
@@ -32,10 +34,13 @@ def _calculate_payment(amount: float) -> dict:
 
 @router.post("", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
 async def create_payment(
+    request: Request,
     payload: PaymentCreate,
     db: AsyncIOMotorDatabase = Depends(get_db),
     current=Depends(get_current_user),
 ):
+    # Rate limiting: máximo 10 pagos por minuto por IP
+    apply_rate_limit(request, "10/minute")
     """
     Crea un pago mockeado para una reserva.
     En producción, esto se integraría con Stripe/PayPal.
@@ -105,18 +110,19 @@ async def create_payment(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
         error_msg = str(e)
-        print(f"Error en create_payment: {error_msg}")
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error al crear el pago: {error_msg}")
+        logger.error(f"Error en create_payment: {error_msg}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Error al crear el pago")
 
 @router.post("/{payment_id}/process", response_model=PaymentOut)
 async def process_payment(
+    request: Request,
     payment_id: str,
     db: AsyncIOMotorDatabase = Depends(get_db),
     current=Depends(get_current_user),
 ):
+    # Rate limiting: máximo 20 procesamientos por minuto
+    apply_rate_limit(request, "20/minute")
     """
     Procesa un pago mockeado (simula el procesamiento de tarjeta).
     En producción, esto llamaría a Stripe/PayPal.

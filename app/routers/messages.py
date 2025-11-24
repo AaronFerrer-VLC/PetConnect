@@ -6,14 +6,16 @@ from bson import ObjectId
 from ..db import get_db
 from ..security import get_current_user
 from ..schemas.message import MessageCreate, MessageOut
-from ..utils import to_id
+from ..utils import to_id, to_object_id
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-def _oid(value: str) -> ObjectId:
-    if not ObjectId.is_valid(value):
-        raise HTTPException(400, "Invalid ID")
-    return ObjectId(value)
+# Usar función centralizada (con alias para compatibilidad)
+def _oid(value: str, field_name: str = "id") -> ObjectId:
+    return to_object_id(value, field_name)
 
 @router.post("", response_model=MessageOut, status_code=status.HTTP_201_CREATED)
 async def create_message(

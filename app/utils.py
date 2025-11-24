@@ -3,6 +3,7 @@ from typing import Any, Dict, Optional, Tuple
 import math
 from bson import ObjectId
 from datetime import datetime
+from fastapi import HTTPException
 
 def to_id(doc: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -104,3 +105,14 @@ def is_within_radius(
     """Verifica si un punto está dentro de un radio dado"""
     distance = haversine_distance(center_lat, center_lng, point_lat, point_lng)
     return distance <= radius_km
+
+# ==================== Utilidades de Base de Datos ====================
+
+def to_object_id(value: str, field_name: str = "id") -> ObjectId:
+    """
+    Convierte un string a ObjectId con validación.
+    Centraliza la lógica de conversión para evitar duplicación.
+    """
+    if not ObjectId.is_valid(value):
+        raise HTTPException(status_code=400, detail=f"Invalid {field_name}: {value}")
+    return ObjectId(value)

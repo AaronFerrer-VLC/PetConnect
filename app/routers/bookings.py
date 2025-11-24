@@ -1,5 +1,5 @@
 # app/routers/bookings.py
-from fastapi import APIRouter, Depends, HTTPException, status, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Path, Request
 from typing import List
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from bson import ObjectId
@@ -7,17 +7,18 @@ from datetime import datetime, timedelta
 
 from ..db import get_db
 from ..schemas.booking import BookingCreate, BookingOut, StatusPatch, BookingStatus
-from ..utils import to_id
+from ..utils import to_id, to_object_id
 from ..security import get_current_user
+from ..middleware.rate_limit import apply_rate_limit
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 # ---------- Utilidades ----------
-
-def _oid(value: str, field_name: str = "id") -> ObjectId:
-    if not ObjectId.is_valid(value):
-        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
-    return ObjectId(value)
+# Usar to_object_id de utils.py en lugar de _oid local
+_oid = to_object_id
 
 def _days_between_inclusive(start_dt: datetime, end_dt: datetime) -> list[str]:
     if end_dt < start_dt:
@@ -74,10 +75,13 @@ async def get_booking(
 
 @router.post("", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 async def create_booking(
+    request: Request,
     payload: BookingCreate,
     db: AsyncIOMotorDatabase = Depends(get_db),
     current=Depends(get_current_user),
 ):
+    # Rate limiting: máximo 15 reservas por minuto por IP
+    apply_rate_limit(request, "15/minute")
     if payload.end <= payload.start:
         raise HTTPException(400, "end debe ser posterior a start")
 

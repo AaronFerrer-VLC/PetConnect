@@ -6,14 +6,15 @@ from typing import Optional, Dict, Any, List
 from datetime import datetime
 from ..db import get_db
 from ..security import get_current_user
-from ..utils import to_id
+from ..utils import to_id, to_object_id
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-def _oid(v: str, field="id") -> ObjectId:
-    if not ObjectId.is_valid(v):
-        raise HTTPException(400, f"Invalid {field}")
-    return ObjectId(v)
+# Usar función centralizada
+_oid = to_object_id
 
 class ReviewCreate(BaseModel):
     booking_id: str
@@ -85,19 +86,14 @@ async def list_reviews(
                         review_dict[key] = value
                 out.append(review_dict)
             except Exception as e:
-                import traceback
-                print(f"Error procesando reseña: {e}")
-                print(traceback.format_exc())
+                logger.error(f"Error procesando reseña: {e}", exc_info=True)
                 continue
         
         return out
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        error_msg = f"Error en list_reviews: {e}"
-        print(error_msg)
-        print(traceback.format_exc())
+        logger.error(f"Error en list_reviews: {e}", exc_info=True)
         # Devolver lista vacía en lugar de error 500
         return []
 
@@ -223,12 +219,10 @@ async def create_review(payload: ReviewCreate,
     except HTTPException as he:
         raise he
     except Exception as e:
-        import traceback
         error_msg = str(e)
-        print(f"Error en create_review: {error_msg}")
-        print(traceback.format_exc())
-        # Devolver error más descriptivo
-        raise HTTPException(status_code=500, detail=f"Error al crear la reseña: {error_msg}")
+        logger.error(f"Error en create_review: {error_msg}", exc_info=True)
+        # Devolver error más descriptivo (sin exponer detalles internos en producción)
+        raise HTTPException(status_code=500, detail="Error al crear la reseña")
 
 @router.patch("/{review_id}", response_model=Dict[str, Any])
 async def update_review(
@@ -273,8 +267,7 @@ async def update_review(
     except Exception as e:
         import traceback
         error_msg = str(e)
-        print(f"Error en update_review: {error_msg}")
-        print(traceback.format_exc())
+        logger.error(f"Error en update_review: {error_msg}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al actualizar la reseña: {error_msg}")
 
 @router.delete("/{review_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -303,6 +296,5 @@ async def delete_review(
     except Exception as e:
         import traceback
         error_msg = str(e)
-        print(f"Error en delete_review: {error_msg}")
-        print(traceback.format_exc())
+        logger.error(f"Error en delete_review: {error_msg}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Error al eliminar la reseña: {error_msg}")

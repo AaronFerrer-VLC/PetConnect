@@ -7,8 +7,11 @@ from bson import ObjectId
 
 from ..db import get_db
 from ..security import get_current_user
-from ..utils import to_id
+from ..utils import to_id, to_object_id
 from ..schemas.user import UserOut, AvailabilityOut  # AvailabilityOut debe incluir weekly_open
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -30,10 +33,8 @@ class GalleryIn(BaseModel):
 # --------- helpers ----------
 WEEK_DAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"]
 
-def _oid(value: str, field_name: str = "id") -> ObjectId:
-    if not ObjectId.is_valid(value):
-        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
-    return ObjectId(value)
+# Usar función centralizada
+_oid = to_object_id
 
 def _normalize_blocked_dates(dates: Optional[list[str]]) -> list[str]:
     if not dates:

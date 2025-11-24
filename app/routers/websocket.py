@@ -5,10 +5,13 @@ import json
 from bson import ObjectId
 from datetime import datetime
 from motor.motor_asyncio import AsyncIOMotorDatabase
+import logging
 
 from ..db import get_db
 from ..security import get_current_user_id
 from ..utils import to_id
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -32,7 +35,7 @@ class ConnectionManager:
             try:
                 await self.active_connections[user_id].send_json(message)
             except Exception as e:
-                print(f"Error sending to {user_id}: {e}")
+                logger.error(f"Error sending to {user_id}: {e}", exc_info=True)
                 self.disconnect(user_id)
 
     async def broadcast(self, message: dict, exclude_user_id: str = None):
@@ -164,6 +167,6 @@ async def websocket_endpoint(websocket: WebSocket, token: str):
     except WebSocketDisconnect:
         manager.disconnect(user_id)
     except Exception as e:
-        print(f"Error en WebSocket: {e}")
+        logger.error(f"Error en WebSocket: {e}", exc_info=True)
         manager.disconnect(user_id)
 

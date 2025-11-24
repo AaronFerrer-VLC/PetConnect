@@ -3,6 +3,9 @@ from httpx import AsyncClient, ASGITransport
 from datetime import datetime, timedelta
 from app.main import app
 
+# Deshabilitar rate limiting en la app para tests
+app.state.limiter = None
+
 @pytest.mark.asyncio
 async def test_booking_status_flow():
     transport = ASGITransport(app=app)

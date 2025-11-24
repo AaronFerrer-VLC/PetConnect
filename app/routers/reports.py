@@ -10,8 +10,12 @@ from pathlib import Path
 from ..db import get_db
 from ..config import get_settings
 from ..security import get_current_user
-from ..utils import to_id
+from ..utils import to_id, to_object_id
 from ..schemas.report import ReportCreate, ReportOut, ReportType
+import logging
+
+logger = logging.getLogger(__name__)
+
 # Importación condicional para evitar circular
 def get_websocket_manager():
     from ..routers.websocket import manager
@@ -20,10 +24,8 @@ def get_websocket_manager():
 router = APIRouter()
 settings = get_settings()
 
-def _oid(value: str, field_name: str = "id") -> ObjectId:
-    if not ObjectId.is_valid(value):
-        raise HTTPException(status_code=400, detail=f"Invalid {field_name}")
-    return ObjectId(value)
+# Usar función centralizada
+_oid = to_object_id
 
 @router.post("", response_model=ReportOut, status_code=status.HTTP_201_CREATED)
 async def create_report(

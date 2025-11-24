@@ -3,6 +3,9 @@ import pytest
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 
+# Deshabilitar rate limiting en la app para tests
+app.state.limiter = None
+
 @pytest.mark.asyncio
 async def test_create_and_list_users():
     transport = ASGITransport(app=app)  # 👈 transporte ASGI para FastAPI

@@ -1,30 +1,77 @@
-# tests/conftest.py
-import os, sys, pytest, asyncio
+"""
+Configuración de pytest para tests
+"""
+import pytest
+from fastapi.testclient import TestClient
 from motor.motor_asyncio import AsyncIOMotorClient
-from app.main import app
-from app.db import get_db
+import os
+from dotenv import load_dotenv
 
-ROOT = os.path.dirname(os.path.dirname(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
+load_dotenv()
+
+# Configuración de test database
+TEST_DB_NAME = os.getenv("TEST_DB_NAME", "petconnect_test")
+TEST_MONGODB_URI = os.getenv("TEST_MONGODB_URI", os.getenv("MONGODB_URI", "mongodb://localhost:27017"))
+
+# Deshabilitar rate limiting en la app antes de importarla
+@pytest.fixture(scope="session", autouse=True)
+def disable_rate_limiting():
+    """Deshabilita rate limiting para todos los tests"""
+    from app.main import app
+    app.state.limiter = None
 
 @pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
+async def test_db():
+    """Fixture para base de datos de test"""
+    client = AsyncIOMotorClient(TEST_MONGODB_URI)
+    db = client[TEST_DB_NAME]
+    yield db
+    # Limpiar después de los tests
+    try:
+        await client.drop_database(TEST_DB_NAME)
+    except Exception:
+        pass  # Ignorar errores al limpiar
+    finally:
+        client.close()
 
-@pytest.fixture(autouse=True)
-async def _override_db():
-    uri = os.getenv("MONGODB_URI", "mongodb://localhost:27017")
-    client = AsyncIOMotorClient(uri)
-    db = client[os.getenv("DB_NAME", "petconnect_test")]
-    async def _get_db():
-        return db
-    app.dependency_overrides[get_db] = _get_db
-    # Limpieza antes de cada test
-    for col in ["users", "pets", "services", "bookings", "messages"]:
-        await db[col].delete_many({})
-    yield
-    app.dependency_overrides.clear()
-    client.close()
+@pytest.fixture
+async def clean_db(test_db):
+    """Limpia la base de datos antes de cada test"""
+    collections = await test_db.list_collection_names()
+    for collection_name in collections:
+        await test_db[collection_name].delete_many({})
+    yield test_db
+
+@pytest.fixture
+def client():
+    """Fixture para cliente de test de FastAPI"""
+    # Importar aquí para evitar problemas de importación circular
+    from app.main import app
+    # Asegurar que rate limiting esté deshabilitado
+    app.state.limiter = None
+    return TestClient(app)
+
+@pytest.fixture
+def test_user_data():
+    """Datos de usuario de prueba"""
+    return {
+        "name": "Test User",
+        "email": "test@example.com",
+        "password": "testpass123",
+        "city": "Madrid",
+        "is_caretaker": False
+    }
+
+@pytest.fixture
+def test_caretaker_data():
+    """Datos de cuidador de prueba"""
+    return {
+        "name": "Test Caretaker",
+        "email": "caretaker@example.com",
+        "password": "testpass123",
+        "city": "Barcelona",
+        "is_caretaker": True,
+        "max_pets": 3,
+        "address": "Calle Test 123",
+        "phone": "+34600123456"
+    }
